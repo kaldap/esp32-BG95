@@ -2,7 +2,8 @@
 #define ESP32_BG95_H
 
 #include <Arduino.h>
-#include <TimeLib.h>
+// #include <Time.h>
+#include "TimeLib.h"
 #include "mbedtls/md.h"
 
 #include "editable_macros.h"
@@ -27,11 +28,10 @@
 #define MQTT_STATE_DISCONNECTING 	4
 
 // CONSTANTS
-#define   AT_WAIT_RESPONSE      	10 // milis
-#define   AT_TERMINATOR     		'\r\n'
+#define   AT_WAIT_RESPONSE      	100 // milis
+#define   AT_TERMINATOR     			'\n'
 
 #define MAX_SMS 10
-
 /*
 struct SMS {
 	bool    used   	= false;
@@ -70,7 +70,7 @@ class MODEMBGXX {
 		* call it to initialize serial port
 		*/
 		void init_port(uint32_t baudrate, uint32_t config);
-		void init_port(uint32_t baudrate, uint32_t serial_config, uint8_t tx_pin, uint8_t rx_pin);
+		void init_port(uint32_t baudrate, uint32_t serial_config, uint8_t tx_pin, uint8_t rx_pin, int8_t ctsPin = -1, int8_t rtsPin = -1);
 		/*
 		* call it to disable serial port
 		*/
@@ -119,7 +119,7 @@ class MODEMBGXX {
 		* freeRTOS - safe function
 		* return tech in use - use it to check if modem is registered in a tower cell
 		*/
-		int8_t get_actual_mode();
+		// int8_t get_actual_mode();
 
 		// --- CONTEXT ---
 		/*
@@ -232,6 +232,14 @@ class MODEMBGXX {
 		void MQTT_readAllBuffers(uint8_t clientID);
 
 		void log_status();
+
+		String check_messages();
+
+		//Network state
+		void get_state(); // get network state
+
+		//MQTT
+		void MQTT_checkConnection();
 	private:
 
 		struct SMS {
@@ -314,7 +322,7 @@ class MODEMBGXX {
 		SMS message[MAX_SMS];
 
 		int8_t mqtt_buffer[5] = {-1,-1,-1,-1,-1}; // index of msg to read
-		int8_t mqtt_tries[5] = {0,0,0,0,0}; // index of msg to read
+		// int8_t mqtt_tries[5] = {0,0,0,0,0}; // index of msg to read
 
 		APN apn[MAX_CONNECTIONS];
 		TCP tcp[MAX_TCP_CONNECTIONS];
@@ -405,7 +413,7 @@ class MODEMBGXX {
 
 		// --- NETWORK STATE ---
 		int16_t get_rssi();
-		void get_state(); // get network state
+		int8_t get_actual_mode();
 
 		// --- CLOCK ---
 		void sync_clock_ntp(bool force = false); // private
@@ -416,7 +424,7 @@ class MODEMBGXX {
 		bool MQTT_open(uint8_t clientID, const char* host, uint16_t port);
 		bool MQTT_isOpened(uint8_t clientID, const char* host, uint16_t port);
 		bool MQTT_close(uint8_t clientID);
-			void MQTT_checkConnection();
+		// void MQTT_checkConnection();
 		void MQTT_readMessages(uint8_t clientID);
 
 		// check for new SMS messages
@@ -426,7 +434,7 @@ class MODEMBGXX {
 		void process_sms(uint8_t index);
 
 		//void check_modem_buffers();
-		String check_messages();
+		// String check_messages();
 
 		String parse_command_line(String line, bool set_data_pending = true);
 		void read_data(uint8_t index, String command, uint16_t bytes);

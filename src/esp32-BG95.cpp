@@ -1,16 +1,34 @@
 #include "esp32-BG95.hpp"
+#include <string>
+#include "esp_log.h"
+#include <ctime>
+
+static const char *TAG = "esp32-BG95";
 
 bool (*parseMQTTmessage)(uint8_t,String,String);
 void(*tcpOnClose)(uint8_t clientID);
 
+//FIXME: Expose pins as arguments
 void MODEMBGXX::init_port(uint32_t baudrate, uint32_t serial_config) {
-	init_port(baudrate, serial_config, 16, 17);
+	init_port(baudrate, serial_config, 6, 7);
 }
 
-void MODEMBGXX::init_port(uint32_t baudrate, uint32_t serial_config, uint8_t rx_pin, uint8_t tx_pin) {
+void MODEMBGXX::init_port(uint32_t baudrate, uint32_t serial_config, uint8_t rx_pin, uint8_t tx_pin, int8_t ctsPin, int8_t rtsPin) {
 
 	//modem->begin(baudrate);
+
+	modem->setRxBufferSize(512);
+	modem->setTxBufferSize(512);
+	// modem->setTxTimeoutMs(0);
 	modem->begin(baudrate,serial_config, rx_pin, tx_pin);
+	if((ctsPin != -1)&&(rtsPin != -1))
+	{
+		log("||    Setting UART HW Control Flow    ||");
+		modem->setPins(rx_pin, tx_pin, ctsPin, rtsPin);
+    	modem->setHwFlowCtrlMode();
+	}
+	
+	modem->flush();
 	#ifdef DEBUG_BG95
 	log("modem bus inited");
 	#endif
@@ -32,6 +50,9 @@ void MODEMBGXX::disable_port() {
 }
 
 bool MODEMBGXX::init(uint8_t radio, uint16_t cops, uint8_t pwkey){
+
+	//REVIEW:
+	esp_log_level_set(TAG, ESP_LOG_VERBOSE);
 
 	op.pwkey = pwkey;
 	pinMode(pwkey, OUTPUT);
@@ -98,7 +119,6 @@ bool MODEMBGXX::wait_modem_to_init(){
 	return false;
 }
 
-// !! use powerCycle instead
 bool MODEMBGXX::switchOn(){
 
 	#ifdef DEBUG_BG95
@@ -109,7 +129,7 @@ bool MODEMBGXX::switchOn(){
 
 	digitalWrite(op.pwkey, LOW);
 
-	wait_modem_to_init();
+	return wait_modem_to_init();
 }
 
 void MODEMBGXX::increase_modem_reboot(){
@@ -122,7 +142,7 @@ bool MODEMBGXX::powerCycle(){
 	log("power cycle modem");
 	#endif
 	digitalWrite(op.pwkey, HIGH);
-	delay(2000);
+	delay(1000);
 
 	digitalWrite(op.pwkey, LOW);
 
@@ -132,7 +152,7 @@ bool MODEMBGXX::powerCycle(){
 		log("power cycle modem");
 		#endif
 		digitalWrite(op.pwkey, HIGH);
-		delay(2000);
+		delay(1000);
 
 		digitalWrite(op.pwkey, LOW);
 
@@ -147,7 +167,7 @@ bool MODEMBGXX::reset() {
 	// APN reset
 	op.ready = false;
 
-	for (uint8_t i = 0; i < MAX_CONNECTIONS; i++) {
+	for (uint8_t i = 0; i < MAX_TCP_CONNECTIONS; i++) {
 		data_pending[i]    = false;
 		apn[i].connected = false;
 	}
@@ -208,11 +228,11 @@ bool MODEMBGXX::loop(uint32_t wait) {
 
 	tcp_check_data_pending();
 
-	if(MQTT_RECV_MODE){
-		for(uint8_t i=0; i<MAX_MQTT_CONNECTIONS; i++){
-			MQTT_readMessages(i);
-		}
-	}
+	// if(MQTT_RECV_MODE){
+	// 	for(uint8_t i=0; i<MAX_MQTT_CONNECTIONS; i++){
+	// 		MQTT_readMessages(i);
+	// 	}
+	// }
 
 	if(loop_until < millis()){
 
@@ -237,7 +257,7 @@ void MODEMBGXX::get_state() {
 
 	check_command("AT+CREG?","OK","ERROR",3000); // both
 
-	get_command("AT+QIACT?",15000);
+	get_command("AT+QIACT?",150000);
 
 	get_rssi();
 
@@ -350,7 +370,7 @@ bool MODEMBGXX::configure_radio_mode(uint8_t radio,uint16_t cops, bool force){
 
 	if(op.radio == GPRS && op.technology != GPRS){
 		if(cops != 0){
-			if(!check_command("AT+COPS="+String(mode)+",2,\""+String(cops)+"\",0","OK","ERROR",45000))
+			if(!check_command("AT+COPS="+String(mode)+",2,\""+String(cops)+"\",0","OK","ERROR",180000))
 				return false;
 		}else{
 			//check_command("AT+QCFG=\"iotopmode\",0,1","OK",3000);
@@ -358,7 +378,7 @@ bool MODEMBGXX::configure_radio_mode(uint8_t radio,uint16_t cops, bool force){
 		}
 	}else if(op.radio == NB && op.technology != NB){
 		if(cops != 0){
-			if(!check_command("AT+COPS="+String(mode)+",2,\""+String(cops)+"\",9","OK","ERROR",45000))
+			if(!check_command("AT+COPS="+String(mode)+",2,\""+String(cops)+"\",9","OK","ERROR",180000))
 			return false;
 		}else{
 			check_command("AT+QCFG=\"iotopmode\",1,1","OK",3000);
@@ -367,7 +387,7 @@ bool MODEMBGXX::configure_radio_mode(uint8_t radio,uint16_t cops, bool force){
 	}else if(op.radio == CATM1 && op.technology != CATM1){
 		if(cops!=0){
 			//if(!check_command("AT+COPS=1,2,"+String(cops)+",8","OK","ERROR",45000)){
-			if(!check_command("AT+COPS="+String(mode)+",2,\""+String(cops)+"\",8","OK","ERROR",45000))
+			if(!check_command("AT+COPS="+String(mode)+",2,\""+String(cops)+"\",8","OK","ERROR",180000))
 				return false;
 		}else{
 			check_command("AT+QCFG=\"iotopmode\",0,1","OK",3000);
@@ -375,7 +395,7 @@ bool MODEMBGXX::configure_radio_mode(uint8_t radio,uint16_t cops, bool force){
 		}
 	}else if(op.radio == AUTO){
 		if(cops != 0){
-			if(!check_command("AT+COPS="+String(mode)+",2,\""+String(cops)+"\"","OK","ERROR",45000))
+			if(!check_command("AT+COPS="+String(mode)+",2,\""+String(cops)+"\"","OK","ERROR",180000))
 				return false;
 		}else{
 			check_command("AT+QCFG=\"iotopmode\",2,1","OK",3000);
@@ -491,6 +511,7 @@ void MODEMBGXX::check_sms() {
 	return;
 }
 
+//FIXME:
 void MODEMBGXX::process_sms(uint8_t index) {
 	if (message[index].used && message[index].index >= 0) {
 		message[index].used = false;
@@ -995,7 +1016,7 @@ bool MODEMBGXX::https_post_json(String host, String path, String body, String to
 */
 bool MODEMBGXX::http_wait_response(uint8_t clientID){
 
-	uint32_t request_timeout = millis() + 15000;
+	uint32_t request_timeout = millis() + 150000;
 
 	while(!tcp_has_data(clientID) && request_timeout > millis()){
 		check_messages();
@@ -1006,6 +1027,7 @@ bool MODEMBGXX::http_wait_response(uint8_t clientID){
 		return false;
 
 	uint16_t header_len = http_get_header_length(clientID);
+	log_output->printf("header_length: %d \n",header_len);
 
 	if(header_len == 0)
 		return false;
@@ -1146,7 +1168,9 @@ uint16_t MODEMBGXX::http_get_body(uint8_t clientID, char* data, uint16_t len, ui
 			count += tcp_recv(clientID,&data[count],size);
 			//count += tcp_recv(clientID,&data[count],len-count);
 			#ifdef DEBUG_BG95_HIGH
+			//FIXME:
 			log("bytes available on buffer: " + String(count));
+			Serial.printf("bytes available on buffer %d \n", count);
 			#endif
 			return count;
 		}
@@ -1258,10 +1282,9 @@ void MODEMBGXX::check_modem_buffers() {
 String MODEMBGXX::check_messages() {
 
 	String command = "";
-	String at_terminator = String(AT_TERMINATOR);
 	while (modem->available() > 0) {
 
-		command += modem->readStringUntil(AT_TERMINATOR);
+		command = modem->readStringUntil(AT_TERMINATOR);
 
 		command.trim();
 
@@ -1517,9 +1540,7 @@ String MODEMBGXX::parse_command_line(String line, bool set_data_pending) {
 			cid = state.toInt();
 			if(cid >= MAX_TCP_CONNECTIONS)
 				return "";
-			#ifdef DEBUG_BG95_HIGH
 			log("connection: "+String(cid)+" closed");
-			#endif
 			tcp[cid].connected = false;
 			tcp_close(cid);
 		}
@@ -1596,43 +1617,19 @@ String MODEMBGXX::parse_command_line(String line, bool set_data_pending) {
 		if(index > -1){
 			uint8_t cidx = line.substring(0,index).toInt();
 			if(cidx < MAX_MQTT_CONNECTIONS){
-				if(line.lastIndexOf(",") != index){
-					index = line.lastIndexOf(",");
-					String state = line.substring(index+1,index+2);
-					if((int)state.toInt() == 0){
-						mqtt[cidx].socket_state = MQTT_STATE_CONNECTED;
-						mqtt[cidx].connected = true;
-						mqtt[cidx].unknow_counter = 0;
-					}else{
-						mqtt[cidx].socket_state = MQTT_STATE_DISCONNECTED;
-						mqtt[cidx].connected = false;
-						switch((int)state.toInt()){
-							case 0:
-								log("mqtt client "+String(cidx)+" Connection refused - Unacceptable Protocol Version");
-							case 1:
-								log("mqtt client "+String(cidx)+" Connection refused - Identifier Rejected");
-							case 2:
-								log("mqtt client "+String(cidx)+" Connection refused - Server Unavailable");
-							case 3:
-								log("mqtt client "+String(cidx)+" Connection refused - Not Authorized");
-						}
-					}
-				}else{
-					String state = line.substring(index+1,index+2);
-					if(isdigit(state.c_str()[0])){
-						mqtt[cidx].socket_state = (int)state.toInt();
-						mqtt[cidx].connected = (int)(state.toInt()==MQTT_STATE_CONNECTED);
-						if(mqtt[cidx].connected)
-							mqtt[cidx].unknow_counter = 0;
-						#ifdef DEBUG_BG95
-						if(mqtt[cidx].connected)
+				String state = line.substring(index+1,index+2);
+				if(isdigit(state.c_str()[0])){
+					mqtt[cidx].socket_state = (int)state.toInt();
+					mqtt[cidx].connected = (int)(state.toInt()==MQTT_STATE_CONNECTED);
+					#ifdef DEBUG_BG95
+					if(mqtt[cidx].connected)
 						log("mqtt client "+String(cidx)+" is connected");
-						else
+					else
 						log("mqtt client "+String(cidx)+" is disconnected");
-						#endif
-						return "";
-					}
+					#endif
+					return "";
 				}
+
 			}
 		}
 	}else if(line.startsWith("OK"))
@@ -1645,7 +1642,6 @@ String MODEMBGXX::mqtt_message_received(String line){
 
 	String filter = "+QMTRECV: ";
 	int index = line.indexOf(",");
-	int last_index = -1;
 	uint8_t clientID = 0;
 	if(index > -1){ // filter found
 		String aux = line.substring(filter.length(),index); // client id
@@ -1653,87 +1649,23 @@ String MODEMBGXX::mqtt_message_received(String line){
 			clientID = aux.toInt();
 		}else return "";
 
-		last_index = line.lastIndexOf(",");
+		aux = line.substring(index+1,index+2); // channel
+		if(isNumeric(aux)){
+			uint8_t channel = (uint8_t)aux.toInt();
+			if(channel < 5)
+				mqtt_buffer[channel] = 0; // I do not know the length of the payload that will be read
+			line = line.substring(index+2); // null
+		}else return "";
 
-
-		if(MQTT_RECV_MODE){
-
-			if(index == last_index){ // URC reporting new message
-				aux = line.substring(index+1,index+2); // channel
-				if(isNumeric(aux)){
-					uint8_t channel = (uint8_t)aux.toInt();
-					if(channel < 5)
-						mqtt_buffer[channel] = 0; // I do not know the length of the payload that will be read
-				}else return "";
-				return "";
-			}
-
-			line = line.substring(index+1); // null
-
+		index = line.indexOf(",");
+		if(index > -1){ // has payload
+			line = line.substring(index+1);
 			index = line.indexOf(",");
-			aux = line.substring(0,index); // msg_id
-			if(isNumeric(aux)){
-				uint16_t msg_id = (uint8_t)aux.toInt();
-				line = line.substring(index+1);
-			}else return "";
-
-			index = line.indexOf(",");
-			if(index > -1 && index != last_index){
+			if(index > -1){
 				String topic = line.substring(0,index);
-				line = line.substring(index+1);
-				index = line.indexOf(",");
-				if(index == -1)
-					return "";
-				String len = line.substring(0,index);
 				String payload = line.substring(index+1);
-				int len_ = len.toInt();
-
-				if(len_ != 0){
-
-					if(!payload.endsWith("\""))
-						payload += "\n"; // it was terminated due to break line found on payload
-					uint32_t timeout = millis() + 300;
-					while(timeout > millis()){
-						String response = modem->readString();
-						payload += response;
-						if(payload.length()-2 >= len_)
-						break;
-					}
-
-					if(payload.length()-2 >= len_){
-						payload = payload.substring(1,len_+1);
-					}else if(payload.length() < len_){
-						log("!! payload is incomplete");
-					}
-					Serial.printf("payload len %d \n",payload.length());
-					Serial.println(payload);
-				}else payload = "";
-
 				if(parseMQTTmessage != NULL)
 					parseMQTTmessage(clientID,topic,payload);
-			}
-
-
-		}else{
-
-			aux = line.substring(index+1,index+2); // channel
-			if(isNumeric(aux)){
-				uint8_t channel = (uint8_t)aux.toInt();
-				if(channel < 5)
-					mqtt_buffer[channel] = 0; // I do not know the length of the payload that will be read
-				line = line.substring(index+2); // null
-			}else return "";
-
-			index = line.indexOf(",");
-			if(index > -1){ // has topic
-				line = line.substring(index+1);
-				index = line.indexOf(",");
-				if(index > -1 && index != last_index){
-					String topic = line.substring(0,index);
-					String payload = line.substring(index+1);
-					if(parseMQTTmessage != NULL)
-						parseMQTTmessage(clientID,topic,payload);
-				}
 			}
 		}
 	}
@@ -1932,7 +1864,7 @@ bool MODEMBGXX::get_clock(tm* t){
 	if(response.length() == 0)
 		return false;
 
-	uint8_t index = 0;
+	int8_t index = 0;
 
 	index = response.indexOf("/");
 	if(index == -1)
@@ -2153,8 +2085,8 @@ bool MODEMBGXX::switch_radio_off(){
 	#ifdef DEBUG_BG95
 	log("switch radio off");
 	#endif
-	if(check_command("AT+CFUN=0","OK","ERROR",15000)){
-		for (uint8_t i = 0; i < MAX_CONNECTIONS; i++) {
+	if(check_command("AT+CFUN=0","OK","ERROR",150000)){
+		for (uint8_t i = 0; i < MAX_TCP_CONNECTIONS; i++) {
 			data_pending[i]    = false;
 			apn[i].connected = false;
 		}
@@ -2234,7 +2166,7 @@ void MODEMBGXX::MQTT_init(bool(*callback)(uint8_t,String,String)) {
 	uint8_t i = 0;
 	while(i<MAX_MQTT_CONNECTIONS){
 		mqtt[i++].active = false;
-		mqtt[i++].unknow_counter = 0;
+		// mqtt[i++].unknow_counter = 0;
 	}
 }
 
@@ -2259,17 +2191,15 @@ bool MODEMBGXX::MQTT_setup(uint8_t clientID, uint8_t contextID, String will_topi
 
 
 	String s = "AT+QMTCFG=\"pdpcid\","+String(clientID)+","+String(mqtt[clientID].contextID);
-	check_command(s.c_str(),"OK",2000);
-		//return false;
+	if(!check_command(s.c_str(),"OK",2000)) return false;
 
-	// store messages on buffer, report payload_len on read
-	s = "AT+QMTCFG=\"recv/mode\","+String(clientID)+","+String(MQTT_RECV_MODE)+","+String(MQTT_RECV_MODE);
-	check_command(s.c_str(),"OK",2000);
-		//return false;
+	s = "AT+QMTCFG=\"recv/mode\","+String(clientID)+",0";
+	if(!check_command(s.c_str(),"OK",2000)) return false;
 
-	s = "AT+QMTCFG=\"will\","+String(clientID)+",1,2,1,\""+will_topic+"\",\""+payload+"\"";
-	check_command(s.c_str(),"OK",2000);
-		//return false;
+	// s = "AT+QMTCFG=\"will\","+String(clientID)+",1,2,1,\""+will_topic+"\",\""+payload+"\"";
+	// check_command(s.c_str(),"OK",2000);
+	s = "AT+QMTCFG=\"will\","+String(clientID)+",1,0,0,\""+will_topic+"\",\""+payload+"\"";
+	if(!check_command(s.c_str(),"OK",2000)) return false;
 
 	return true;
 }
@@ -2326,9 +2256,9 @@ bool MODEMBGXX::MQTT_connect(uint8_t clientID, const char* uid, const char* user
 
 	if(mqtt[clientID].socket_state == MQTT_STATE_CONNECTED){
 		mqtt[clientID].connected = true;
-		mqtt[clientID].unknow_counter = 0;
+		// mqtt[clientID].unknow_counter = 0;
 	}
-
+	
 	return mqtt[clientID].connected;
 }
 
@@ -2477,13 +2407,10 @@ int8_t MODEMBGXX::MQTT_publish(uint8_t clientID, uint16_t msg_id,uint8_t qos, ui
 	if(qos == 0)
 		msg_id_ = 0;
 
-	if(!payload.startsWith("\""))
-		payload = "\""+payload+"\"";
-
-	String s = "AT+QMTPUBEX="+String(clientID)+","+String(msg_id_)+","+String(qos)+","+String(retain)+",\""+topic+"\","+payload;
+	String s = "AT+QMTPUBEX="+String(clientID)+","+String(msg_id_)+","+String(qos)+","+String(retain)+",\""+topic+"\",\""+payload+"\"";
 	String f = "+QMTPUB: "+String(clientID)+","+String(msg_id_)+",";
 
-	String response = get_command_no_ok_critical(s.c_str(),f.c_str(),15000);
+	String response = get_command_no_ok_critical(s.c_str(),f.c_str(),150000);
 	response = response.substring(0,1);
 	if(response.length() > 0){
 		if(isdigit(response.c_str()[0])){
@@ -2508,11 +2435,11 @@ void MODEMBGXX::MQTT_readAllBuffers(uint8_t clientID) {
 	int8_t i = 0;
 
 	if(MQTT_connected(clientID)){
-		for(uint8_t i=0; i<5; i++){
+		do{
 			s = "AT+QMTRECV="+String(clientID)+","+String(i);
 			get_command(s.c_str(),400);
 			mqtt_buffer[i] = -1;
-		}
+		}while(i++<5);
 	}
 
 	return;
@@ -2530,18 +2457,18 @@ void MODEMBGXX::MQTT_readAllBuffers(uint8_t clientID) {
 */
 void MODEMBGXX::MQTT_checkConnection(){
 
-	for (uint8_t i = 0; i < MAX_MQTT_CONNECTIONS; i++) {
-		if(mqtt[i].connected){
-			Serial.println("mqtt is connected");
-			mqtt[i].unknow_counter++;
-			Serial.printf("counter %d \n",mqtt[i].unknow_counter);
-			if(mqtt[i].unknow_counter >= 3){
-				Serial.println("mqtt was disconnected");
-				mqtt[i].connected = false;
-				mqtt[i].socket_state = MQTT_STATE_DISCONNECTED;
-			}
-		}
-	}
+	// for (uint8_t i = 0; i < MAX_MQTT_CONNECTIONS; i++) {
+	// 	if(mqtt[i].connected){
+	// 		Serial.println("mqtt is connected");
+	// 		mqtt[i].unknow_counter++;
+	// 		Serial.printf("counter %d \n",mqtt[i].unknow_counter);
+	// 		if(mqtt[i].unknow_counter >= 3){
+	// 			Serial.println("mqtt was disconnected");
+	// 			mqtt[i].connected = false;
+	// 			mqtt[i].socket_state = MQTT_STATE_DISCONNECTED;
+	// 		}
+	// 	}
+	// }
 
 	String s = "AT+QMTCONN?";
 	String res = get_command(s.c_str(),2000);
@@ -2559,22 +2486,12 @@ bool MODEMBGXX::MQTT_open(uint8_t clientID, const char* host, uint16_t port) {
 
 	if(MQTT_connected(clientID)){
 		mqtt[clientID].connected = true;
-		mqtt[clientID].unknow_counter = 0;
+		// mqtt[clientID].unknow_counter = 0;
 	}else{
 		MQTT_close(clientID);
 		String s = "AT+QMTOPEN="+String(clientID)+",\""+String(host)+"\","+String(port);
-		String res = get_command(s.c_str(),"+QMTOPEN: "+String(clientID)+",",5000);
-		//if(check_command_no_ok(s.c_str(),"+QMTOPEN: "+String(clientID)+",0",5000))
-		if(res == "0"){
+		if(check_command_no_ok(s.c_str(),"+QMTOPEN: "+String(clientID)+",0",5000))
 			mqtt[clientID].connected = true;
-			mqtt[clientID].unknow_counter = 0;
-		}else if(res == "-1" && clientID == 0){
-			mqtt_tries[clientID]++;
-			if(mqtt_tries[clientID] >= 5){
-				mqtt_tries[clientID] = 0;
-				close_pdp_context(mqtt[clientID].contextID);
-			}
-		}
 		else mqtt[clientID].connected = false;
 	}
 
@@ -2615,7 +2532,7 @@ bool MODEMBGXX::MQTT_close(uint8_t clientID) {
 * No need to use if mqtt messages came on unsolicited response (current configuration)
 */
 void MODEMBGXX::MQTT_readMessages(uint8_t clientID) {
-	if(clientID >= MAX_MQTT_CONNECTIONS)
+	if(clientID >= MAX_CONNECTIONS)
 		return;
 
 	String s = "";
@@ -2623,19 +2540,13 @@ void MODEMBGXX::MQTT_readMessages(uint8_t clientID) {
 	bool read = false;
 
 	/* check if a buffer has messages */
-	if(mqtt_pool_timeout < millis()){
-		mqtt_pool = true;
-		mqtt_pool_timeout = millis()+60000;
-	}else mqtt_pool = false;
-
-	while(i<5){
-		if(mqtt_pool || mqtt_buffer[i] != -1){
+	do{
+		if(mqtt_buffer[i] != -1){
 			s = "AT+QMTRECV="+String(clientID)+","+String(i);
 			get_command(s.c_str(),400);
 			mqtt_buffer[i] = -1;
 		}
-		i++;
-	}
+	}while(i++<5);
 
 	return;
 }
@@ -2648,7 +2559,7 @@ void MODEMBGXX::MQTT_readMessages(uint8_t clientID) {
 * read tcp buffers from modem
 */
 void MODEMBGXX::tcp_check_data_pending() {
-	for (uint8_t index = 0; index < MAX_CONNECTIONS; index++) {
+	for (uint8_t index = 0; index < MAX_TCP_CONNECTIONS; index++) {
 		if (!data_pending[index]) continue;
 
 		tcp_read_buffer(index);
@@ -3218,8 +3129,11 @@ void MODEMBGXX::check_commands() {
 }
 
 void MODEMBGXX::log(String text) {
-	//log_output->println("[" + date() + "] bgxx: " + text);
-	log_output->println("bgxx: " + text);
+
+	if(text.indexOf("ERROR") != -1) ESP_LOGE(TAG, "%s", text.c_str());
+	else if(text.indexOf("disconnected") != -1) ESP_LOGE(TAG, "%s", text.c_str());
+	else if(text.indexOf("connected") != -1) ESP_LOGI(TAG, "%s", text.c_str());
+	else ESP_LOGV(TAG, "%s", text.c_str());
 }
 
 String MODEMBGXX::date() {
