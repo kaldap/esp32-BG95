@@ -7,6 +7,9 @@
 #include "mbedtls/md.h"
 
 #include "editable_macros.h"
+//BG95
+#define DEBUG_BG95 1
+#define DEBUG_BG95_HIGH 1
 
 #define GSM 	1
 #define GPRS 	2

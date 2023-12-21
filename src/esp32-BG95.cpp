@@ -255,7 +255,7 @@ void MODEMBGXX::get_state() {
 
 	String state = "";
 
-	check_command("AT+CREG?","OK","ERROR",3000); // both
+	check_command("AT+CEREG?","OK","ERROR",3000); // both
 
 	get_command("AT+QIACT?",150000);
 
@@ -269,7 +269,7 @@ int8_t MODEMBGXX::get_actual_mode(){
 }
 
 void MODEMBGXX::log_status() {
-
+	get_state();
 	//log("imei: "+get_imei());
 	//log("ccid: "+get_ccid());
 	//log("has context: "+String(has_context()));
@@ -326,15 +326,15 @@ bool MODEMBGXX::config() {
 		#ifdef DEBUG_BG95
 		log("[config] imei: " + imei);
 		#endif
-		delay(5000);
+		delay(1000);
 
-		check_command("AT+CSCS=\"IRA\"", "OK");
+		// check_command("AT+CSCS=\"IRA\"", "OK");
 
-		if (check_command("AT+CMGF=1", "OK", "ERROR")){
-			#ifdef DEBUG_BG95
-			log("[config] sms text mode on");
-			#endif
-		}else log("couldn't configure sms");
+		// if (check_command("AT+CMGF=1", "OK", "ERROR")){
+		// 	#ifdef DEBUG_BG95
+		// 	log("[config] sms text mode on");
+		// 	#endif
+		// }else log("couldn't configure sms");
 
 		op.did_config = true;
 	}
@@ -391,7 +391,7 @@ bool MODEMBGXX::configure_radio_mode(uint8_t radio,uint16_t cops, bool force){
 				return false;
 		}else{
 			check_command("AT+QCFG=\"iotopmode\",0,1","OK",3000);
-			check_command("AT+QCFG=\"nwscanmode\",0,1","OK",3000);
+			check_command("AT+QCFG=\"nwscanmode\",3,1","OK",3000);
 		}
 	}else if(op.radio == AUTO){
 		if(cops != 0){
