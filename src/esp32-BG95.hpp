@@ -30,6 +30,14 @@
 #define MQTT_STATE_CONNECTED 		3
 #define MQTT_STATE_DISCONNECTING 	4
 
+#define TAU_MAX_VALUE 0x1F
+#define TAU_10M 0x00 << 5
+#define TAU_1H 0x01 << 5
+#define TAU_10H 0x02 << 5
+#define TAU_2S 0x03 << 5
+#define TAU_30S 0x04 << 5
+#define TAU_1M 0x05 << 5
+
 // CONSTANTS
 #define   AT_WAIT_RESPONSE      	100 // milis
 #define   AT_TERMINATOR     			'\n'
@@ -46,7 +54,7 @@ struct SMS {
 class MODEMBGXX {
 	public:
 
-		HardwareSerial *log_output = &Serial;
+		HardwareSerial *log_output = &Serial0;
 		HardwareSerial *modem = &Serial2;
 
 		MODEMBGXX(){};
@@ -243,6 +251,11 @@ class MODEMBGXX {
 
 		//MQTT
 		void MQTT_checkConnection();
+
+		//PSM
+		bool enable_psm(uint8_t tau, uint8_t active_time);
+		bool disable_psm();
+
 	private:
 
 		struct SMS {
@@ -377,6 +390,10 @@ class MODEMBGXX {
 		* wait for at response
 		*/
 		bool wait_modem_to_init();
+		/*
+		* used for soft start via powerkey
+		*/
+		bool wait_modem_to_soft_init();
 		/*
 		* switch modem on
 		*/
