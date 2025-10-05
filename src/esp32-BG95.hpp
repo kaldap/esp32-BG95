@@ -2,10 +2,14 @@
 #define ESP32_BG95_H
 
 #include <Arduino.h>
-#include <TimeLib.h>
+// #include <Time.h>
+#include "TimeLib.h"
 #include "mbedtls/md.h"
 
 #include "editable_macros.h"
+//BG95
+#define DEBUG_BG95 1
+#define DEBUG_BG95_HIGH 1
 
 #define GSM 	1
 #define GPRS 	2
@@ -26,12 +30,19 @@
 #define MQTT_STATE_CONNECTED 		3
 #define MQTT_STATE_DISCONNECTING 	4
 
+#define TAU_MAX_VALUE 0x1F
+#define TAU_10M 0x00 << 5
+#define TAU_1H 0x01 << 5
+#define TAU_10H 0x02 << 5
+#define TAU_2S 0x03 << 5
+#define TAU_30S 0x04 << 5
+#define TAU_1M 0x05 << 5
+
 // CONSTANTS
-#define   AT_WAIT_RESPONSE      	10 // milis
-#define   AT_TERMINATOR     		'\r\n'
+#define   AT_WAIT_RESPONSE      	100 // milis
+#define   AT_TERMINATOR     			'\n'
 
 #define MAX_SMS 10
-
 /*
 struct SMS {
 	bool    used   	= false;
@@ -43,7 +54,7 @@ struct SMS {
 class MODEMBGXX {
 	public:
 
-		HardwareSerial *log_output = &Serial;
+		HardwareSerial *log_output = &Serial0;
 		HardwareSerial *modem = &Serial2;
 
 		MODEMBGXX(){};
@@ -70,7 +81,7 @@ class MODEMBGXX {
 		* call it to initialize serial port
 		*/
 		void init_port(uint32_t baudrate, uint32_t config);
-		void init_port(uint32_t baudrate, uint32_t serial_config, uint8_t tx_pin, uint8_t rx_pin);
+		void init_port(uint32_t baudrate, uint32_t serial_config, uint8_t tx_pin, uint8_t rx_pin, int8_t ctsPin = -1, int8_t rtsPin = -1);
 		/*
 		* call it to disable serial port
 		*/
@@ -119,7 +130,7 @@ class MODEMBGXX {
 		* freeRTOS - safe function
 		* return tech in use - use it to check if modem is registered in a tower cell
 		*/
-		int8_t get_actual_mode();
+		// int8_t get_actual_mode();
 
 		// --- CONTEXT ---
 		/*
@@ -232,6 +243,19 @@ class MODEMBGXX {
 		void MQTT_readAllBuffers(uint8_t clientID);
 
 		void log_status();
+
+		String check_messages();
+
+		//Network state
+		void get_state(); // get network state
+
+		//MQTT
+		void MQTT_checkConnection();
+
+		//PSM
+		bool enable_psm(uint8_t tau, uint8_t active_time);
+		bool disable_psm();
+
 	private:
 
 		struct SMS {
@@ -314,7 +338,7 @@ class MODEMBGXX {
 		SMS message[MAX_SMS];
 
 		int8_t mqtt_buffer[5] = {-1,-1,-1,-1,-1}; // index of msg to read
-		int8_t mqtt_tries[5] = {0,0,0,0,0}; // index of msg to read
+		// int8_t mqtt_tries[5] = {0,0,0,0,0}; // index of msg to read
 
 		APN apn[MAX_CONNECTIONS];
 		TCP tcp[MAX_TCP_CONNECTIONS];
@@ -367,6 +391,10 @@ class MODEMBGXX {
 		*/
 		bool wait_modem_to_init();
 		/*
+		* used for soft start via powerkey
+		*/
+		bool wait_modem_to_soft_init();
+		/*
 		* switch modem on
 		*/
 		bool switchOn();
@@ -405,7 +433,7 @@ class MODEMBGXX {
 
 		// --- NETWORK STATE ---
 		int16_t get_rssi();
-		void get_state(); // get network state
+		int8_t get_actual_mode();
 
 		// --- CLOCK ---
 		void sync_clock_ntp(bool force = false); // private
@@ -416,7 +444,7 @@ class MODEMBGXX {
 		bool MQTT_open(uint8_t clientID, const char* host, uint16_t port);
 		bool MQTT_isOpened(uint8_t clientID, const char* host, uint16_t port);
 		bool MQTT_close(uint8_t clientID);
-			void MQTT_checkConnection();
+		// void MQTT_checkConnection();
 		void MQTT_readMessages(uint8_t clientID);
 
 		// check for new SMS messages
@@ -426,7 +454,7 @@ class MODEMBGXX {
 		void process_sms(uint8_t index);
 
 		//void check_modem_buffers();
-		String check_messages();
+		// String check_messages();
 
 		String parse_command_line(String line, bool set_data_pending = true);
 		void read_data(uint8_t index, String command, uint16_t bytes);
