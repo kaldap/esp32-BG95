@@ -199,12 +199,12 @@ class MODEMBGXX {
 		bool https_post_json(String host, String path, String body, String token, uint8_t clientID, uint8_t sslClientID, uint8_t contextID);
 		uint16_t http_get_header_length(uint8_t clientID);
 		bool http_wait_response(uint8_t clientID);
-		void http_parse_header(char* data, uint16_t len);
-		String http_response_status();
-		String http_md5();
-		uint16_t http_get_body_size();
+		void http_parse_header(uint8_t clientID, char* data, uint16_t len);
+		String http_response_status(uint8_t clientID);
+		String http_md5(uint8_t clientID);
+		uint16_t http_get_body_size(uint8_t clientID);
 		uint16_t http_get_body(uint8_t clientID, char* data, uint16_t len, uint16_t wait = 10000);
-		bool http_check_md5(char* data, uint16_t len);
+		bool http_check_md5(uint8_t clientID, char* data, uint16_t len);
 		// --- CLOCK ---
 		/*
 		* use it to get network clock
@@ -343,7 +343,7 @@ class MODEMBGXX {
 		APN apn[MAX_CONNECTIONS];
 		TCP tcp[MAX_TCP_CONNECTIONS];
 		MQTT mqtt[MAX_MQTT_CONNECTIONS];
-		HTTP http;
+		HTTP http[MAX_TCP_CONNECTIONS];
 
 		mbedtls_md_context_t ctx;
 

@@ -1195,7 +1195,7 @@ bool MODEMBGXX::http_wait_response(uint8_t clientID)
 
     uint16_t len = tcp_recv(clientID, data, header_len);
 
-    http_parse_header((char *)data, len);
+    http_parse_header(clientID, (char *)data, len);
     free(data);
 
     // stores body
@@ -1228,13 +1228,13 @@ uint16_t MODEMBGXX::http_get_header_length(uint8_t clientID)
     return 0;
 }
 
-void MODEMBGXX::http_parse_header(char *data, uint16_t len)
+void MODEMBGXX::http_parse_header(uint8_t clientID, char *data, uint16_t len)
 {
 
-    http.body_len = 0;
-    memset(http.responseStatus, 0, sizeof(http.responseStatus));
-    memset(http.contentType, 0, sizeof(http.contentType));
-    memset(http.md5, 0, sizeof(http.md5));
+    http[clientID].body_len = 0;
+    memset(http[clientID].responseStatus, 0, sizeof(http[clientID].responseStatus));
+    memset(http[clientID].contentType, 0, sizeof(http[clientID].contentType));
+    memset(http[clientID].md5, 0, sizeof(http[clientID].md5));
 
     std::string header;
     header.assign(&data[0], &data[len - 1]);
@@ -1254,41 +1254,41 @@ void MODEMBGXX::http_parse_header(char *data, uint16_t len)
         if(i == 0)
         {
             String res_str = String(line.c_str());
-            if(res_str.length() < sizeof(http.responseStatus))
+            if(res_str.length() < sizeof(http[clientID].responseStatus))
             {
-                memcpy(http.responseStatus, res_str.c_str(), sizeof(res_str));
+                memcpy(http[clientID].responseStatus, res_str.c_str(), sizeof(res_str));
             }
             else
             {
-                memcpy(http.responseStatus, res_str.c_str(), sizeof(http.responseStatus));
+                memcpy(http[clientID].responseStatus, res_str.c_str(), sizeof(http[clientID].responseStatus));
             }
         }
 
         if(line.find("Content-Length: ") != std::string::npos)
         {
             String length_str = String(line.substr(16).c_str());
-            http.body_len = length_str.toInt();
+            http[clientID].body_len = length_str.toInt();
         }
         else if(line.find("Content-MD5: ") != std::string::npos)
         {
             String md5_str = String(line.substr(13).c_str());
             uint8_t j = 0;
-            while(j < sizeof(http.md5))
+            while(j < sizeof(http[clientID].md5))
             {
-                http.md5[j] = str2hex(md5_str.substring(j * 2, j * 2 + 2));
+                http[clientID].md5[j] = str2hex(md5_str.substring(j * 2, j * 2 + 2));
                 j++;
             }
         }
         else if(line.find("Content-Type: ") != std::string::npos)
         {
             String ctype = String(line.substr(14).c_str());
-            if(ctype.length() < sizeof(http.md5))
+            if(ctype.length() < sizeof(http[clientID].md5))
             {
-                memcpy(http.contentType, ctype.c_str(), sizeof(ctype));
+                memcpy(http[clientID].contentType, ctype.c_str(), sizeof(ctype));
             }
             else
             {
-                memcpy(http.contentType, ctype.c_str(), sizeof(http.contentType));
+                memcpy(http[clientID].contentType, ctype.c_str(), sizeof(http[clientID].contentType));
             }
         }
 
@@ -1303,27 +1303,27 @@ void MODEMBGXX::http_parse_header(char *data, uint16_t len)
 /*
  * return http response result
  */
-String MODEMBGXX::http_response_status()
+String MODEMBGXX::http_response_status(uint8_t clientID)
 {
 
-    return String(http.responseStatus);
+    return String(http[clientID].responseStatus);
 }
 
 /*
  * return md5 of last request
  */
-String MODEMBGXX::http_md5()
+String MODEMBGXX::http_md5(uint8_t clientID)
 {
 
-    return String(http.md5);
+    return String(http[clientID].md5);
 }
 
 /*
  * returns body size to be read
  */
-uint16_t MODEMBGXX::http_get_body_size()
+uint16_t MODEMBGXX::http_get_body_size(uint8_t clientID)
 {
-    return http.body_len;
+    return http[clientID].body_len;
 }
 /*
  * gets body data
@@ -1372,7 +1372,7 @@ uint16_t MODEMBGXX::http_get_body(uint8_t clientID, char *data, uint16_t len, ui
  * check md5 file (Content-MD5: has to be received on header),
  * otherwise it will returns false
  */
-bool MODEMBGXX::http_check_md5(char *data, uint16_t len)
+bool MODEMBGXX::http_check_md5(uint8_t clientID, char *data, uint16_t len)
 {
 
     char hash[16];
@@ -1384,7 +1384,7 @@ bool MODEMBGXX::http_check_md5(char *data, uint16_t len)
     mbedtls_md_finish(&ctx, (unsigned char *)hash);
     mbedtls_md_free(&ctx);
 
-    if(memcmp(hash, http.md5, 16) == 0)
+    if(memcmp(hash, http[clientID].md5, 16) == 0)
         return true;
 
     return false;
