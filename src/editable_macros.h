@@ -5,14 +5,14 @@
 #ifndef MAX_CONNECTIONS
 #define MAX_CONNECTIONS				  4
 #endif
-#ifndef MAX_TCP_CONNECTIONS
-#define MAX_TCP_CONNECTIONS			2
+#ifndef MAX_SOCK_CONNECTIONS
+#define MAX_SOCK_CONNECTIONS			2
 #endif
 #ifndef MAX_MQTT_CONNECTIONS
-#define MAX_MQTT_CONNECTIONS		2
+#define MAX_MQTT_CONNECTIONS		1
 #endif
 #ifndef CONNECTION_BUFFER
-#define CONNECTION_BUFFER			  650 // bytes
+#define CONNECTION_BUFFER			  2048 // bytes
 #endif
 #ifndef CONNECTION_STATE
 #define CONNECTION_STATE			  10000 // millis

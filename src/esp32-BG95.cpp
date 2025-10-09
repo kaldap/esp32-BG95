@@ -1,4 +1,5 @@
 #include "esp32-BG95.hpp"
+#include "esp32-hal-gpio.h"
 #include "esp_log.h"
 #include <ctime>
 #include <string>
@@ -54,22 +55,25 @@ void MODEMBGXX::disable_port()
     modem->end();
 }
 
-bool MODEMBGXX::init(uint8_t radio, uint16_t cops, uint8_t pwkey)
+bool MODEMBGXX::init(uint8_t radio, uint16_t cops, uint8_t pwkey, uint8_t pwled)
 {
 
     // REVIEW:
     //  esp_log_level_set(TAG, ESP_LOG_VERBOSE);
 
     op.pwkey = pwkey;
+    op.pwled = pwled;
     pinMode(pwkey, OUTPUT);
+    pinMode(pwled, INPUT);
 
     op.radio = radio;
     op.cops = cops;
 
     ESP_LOGE(TAG, "init modem1");
 
-    // if(!powerCycle())
-    // 	return false;
+	//if (digitalRead(pwled)) // Always power-cycle to get defined state
+    	if (!powerCycle())
+       		return false;
 
     ESP_LOGE(TAG, "init modem2");
 
@@ -77,6 +81,8 @@ bool MODEMBGXX::init(uint8_t radio, uint16_t cops, uint8_t pwkey)
         return false;
 
     ESP_LOGE(TAG, "init modem3");
+
+	check_command("AT+CFUN=0", "OK", "ERROR", 3000);
 
     if(!configure_radio_mode(radio, cops))
         return false;
@@ -170,32 +176,19 @@ void MODEMBGXX::increase_modem_reboot()
     next_retry = millis() + 5 * 60 * 1000; // 15 minutes
 }
 
-bool MODEMBGXX::powerCycle()
-{
+bool MODEMBGXX::powerCycle() {
 
 #ifdef DEBUG_BG95
     log("power cycle modem");
-#endif
-    digitalWrite(op.pwkey, HIGH);
-    delay(750);
-    digitalWrite(op.pwkey, LOW);
-
-    if(!wait_modem_to_soft_init())
-    {
-
-#ifdef DEBUG_BG95
-        log("power cycle modem after first attempt");
-#endif
-        digitalWrite(op.pwkey, HIGH);
-        delay(750);
-        digitalWrite(op.pwkey, LOW);
-        delay(1800);
-        digitalWrite(op.pwkey, HIGH);
-        delay(750);
-        digitalWrite(op.pwkey, LOW);
-
-        return wait_modem_to_soft_init();
-    }
+#endif	
+	do {
+		digitalWrite(op.pwkey, HIGH);
+		delay(750);
+		digitalWrite(op.pwkey, LOW);
+		delay(1500);
+	}
+	while (digitalRead(op.pwled) || !wait_modem_to_soft_init());
+	reset();
 
     return true;
 }
@@ -205,13 +198,14 @@ bool MODEMBGXX::reset()
 
     // APN reset
     op.ready = false;
+    op.did_reset = true;
 
-    for(uint8_t i = 0; i < MAX_TCP_CONNECTIONS; i++)
+    for(uint8_t i = 0; i < MAX_SOCK_CONNECTIONS; i++)
     {
         data_pending[i] = false;
         apn[i].connected = false;
     }
-    for(uint8_t i = 0; i < MAX_TCP_CONNECTIONS; i++)
+    for(uint8_t i = 0; i < MAX_SOCK_CONNECTIONS; i++)
     {
         tcp[i].connected = false;
     }
@@ -221,6 +215,12 @@ bool MODEMBGXX::reset()
     }
 
     return true;
+}
+
+bool MODEMBGXX::didReset() {
+	bool did = op.did_reset;
+	op.did_reset = false;
+	return did;
 }
 
 bool MODEMBGXX::setup(uint8_t cid, String apn_, String username, String password)
@@ -240,7 +240,9 @@ bool MODEMBGXX::setup(uint8_t cid, String apn_, String username, String password
     memset(apn[cid - 1].name, 0, sizeof(apn[cid].name));
     memcpy(apn[cid - 1].name, apn_.c_str(), apn_.length());
 
-    return check_command("AT+QICSGP=" + String(cid) + ",1,\"" + apn_ + "\",\"" + username + "\",\"" + password + "\"", "OK", "ERROR"); // replacing CGDCONT
+    return 
+    	check_command("AT+QICSGP=" + String(cid) + ",1,\"" + apn_ + "\",\"" + username + "\",\"" + password + "\"", "OK", "ERROR") && // replacing CGDCONT
+    	check_command("AT+CFUN=1", "OK", "ERROR", 3000);
 }
 
 bool MODEMBGXX::set_ssl(uint8_t ssl_cid)
@@ -272,16 +274,20 @@ bool MODEMBGXX::loop(uint32_t wait)
 
     check_messages();
 
-    tcp_check_data_pending();
+	if (op.check_sms) {
+		op.check_sms = false;
+		check_sms();
+	}
 
-    // if(MQTT_RECV_MODE){
-    // 	for(uint8_t i=0; i<MAX_MQTT_CONNECTIONS; i++){
-    // 		MQTT_readMessages(i);
-    // 	}
-    // }
+	for (uint8_t i = 0; i < MAX_SOCK_CONNECTIONS; i++)
+		if (tcp[i].to_be_closed)
+			tcp_close(i);   
+
+	tcp_check_data_pending();
 
     if(loop_until < millis())
     {
+		tcp_check_data_pending(true);
 
         get_state();
 
@@ -304,7 +310,7 @@ void MODEMBGXX::get_state()
 
     check_command("AT+CEREG?", "OK", "ERROR", 3000); // both
 
-    get_command("AT+QIACT?", 150000);
+    get_command("AT+QIACT?", 3000);
 
     get_rssi();
 
@@ -337,7 +343,7 @@ void MODEMBGXX::log_status()
             log("apn name: " + String(apn[i].name) + " disconnected");
     }
 
-    for(uint8_t i = 0; i < MAX_TCP_CONNECTIONS; i++)
+    for(uint8_t i = 0; i < MAX_SOCK_CONNECTIONS; i++)
     {
         if(!tcp[i].active)
             continue;
@@ -455,7 +461,7 @@ bool MODEMBGXX::configure_radio_mode(uint8_t radio, uint16_t cops, bool force)
     {
         if(cops != 0)
         {
-            // if(!check_command("AT+COPS=1,2,"+String(cops)+",8","OK","ERROR",45000)){
+            // if(!check_command("AT+COPS=1,2,"+String(cops)+",8","OK","ERROR",45000)) {
             if(!check_command("AT+COPS=" + String(mode) + ",2,\"" + String(cops) + "\",8", "OK", "ERROR", 180000))
                 return false;
         }
@@ -479,7 +485,14 @@ bool MODEMBGXX::configure_radio_mode(uint8_t radio, uint16_t cops, bool force)
         }
     }
     else
+    {
         return false;
+    }
+
+	if (cops == 0)
+	{
+		check_command("AT+COPS=0", "OK", "ERROR", 3000);
+	}
 
     return true;
 }
@@ -494,7 +507,7 @@ void MODEMBGXX::check_sms()
     String sms[7]; // index, status, origin, phonebook, date, time, msg
     // uint8_t  index     = 0;
     uint32_t timeout = millis() + 10000;
-    bool found_sms = false;
+    //bool found_sms = false;
     uint8_t counter = 0;
 
     while(timeout >= millis())
@@ -601,7 +614,7 @@ void MODEMBGXX::check_sms()
 // FIXME:
 void MODEMBGXX::process_sms(uint8_t index)
 {
-    if(message[index].used && message[index].index >= 0)
+    if(message[index].used /*&& message[index].index >= 0*/) // index is uint8_t, this condition does not make sense
     {
         message[index].used = false;
 
@@ -655,6 +668,117 @@ bool MODEMBGXX::sms_handler(void (*handler)(uint8_t, String, String))
 
 // --- --- ---
 
+// --- UDP ---
+bool MODEMBGXX::udp_connect(uint8_t clientID, String host, uint16_t port, uint16_t wait)
+{
+
+    uint8_t contextID = 1;
+    if(apn_connected(contextID) != 1)
+        return false;
+
+    if(clientID >= MAX_SOCK_CONNECTIONS) return false;
+
+    memset(tcp[clientID].server, 0, sizeof(tcp[clientID].server));
+    memcpy(tcp[clientID].server, host.c_str(), host.length());
+    tcp[clientID].port = port;
+    tcp[clientID].active = true;
+    tcp[clientID].ssl = false;    
+
+    if(check_command_no_ok("AT+QIOPEN=" + String(contextID) + "," + String(clientID) + ",\"UDP\",\"" + host + "\"," + String(port), "+QIOPEN: " + String(clientID) + ",0", "ERROR"), wait)
+    {		
+        tcp[clientID].connected = true;
+        return true;
+    }
+    else
+        tcp_close(clientID);
+
+    get_command("AT+QIGETERROR");
+
+    return false;
+}
+
+bool MODEMBGXX::udp_close(uint8_t clientID)
+{
+    if(clientID >= MAX_SOCK_CONNECTIONS)
+        return false;
+
+    tcp[clientID].active = false;
+    connected_since[clientID] = 0;
+    data_pending[clientID] = false;
+
+    if(check_command("AT+QICLOSE=" + String(clientID), "OK", "ERROR", 10000))
+        tcp[clientID].connected = false;
+
+    return tcp[clientID].connected;
+}
+
+bool MODEMBGXX::udp_connected(uint8_t clientID)
+{
+    if(clientID >= MAX_SOCK_CONNECTIONS) return false;
+    return tcp[clientID].connected;
+}
+
+bool MODEMBGXX::udp_send(uint8_t clientID, const char *data, uint16_t size, uint16_t wait)
+{
+    if(clientID >= MAX_CONNECTIONS) return false;
+    if(udp_connected(clientID) == 0) return false;
+
+    while(modem->available())
+    {
+        String line = modem->readStringUntil(AT_TERMINATOR);
+        line.trim();
+        parse_command_line(line, true);
+    }
+
+    while(modem->available()) modem->read(); // delete garbage on buffer
+
+    if(!check_command_no_ok("AT+QISEND=" + String(clientID) + "," + String(size), ">", "ERROR"))
+        return false;
+
+    send_command_raw((uint8_t*)data, size);
+    delay(AT_WAIT_RESPONSE);
+
+    uint32_t timeout = millis() + wait;
+    String new_data_command = "";
+
+    while(timeout >= millis())
+    {
+        if(modem->available())
+        {
+            String line = modem->readStringUntil(AT_TERMINATOR);
+
+            line.trim();
+
+            if(line.length() == 0) continue;
+
+// log("[send] ? '" + line + "'");
+#ifdef DEBUG_BG95
+            log("parse: " + line);
+#endif
+            parse_command_line(line, true);
+
+            if(line.indexOf("SEND OK") > -1 || line.indexOf("OK") > -1) return true;
+        }
+
+        delay(AT_WAIT_RESPONSE);
+    }
+
+    tcp_check_data_pending();
+    return false;
+}
+
+uint16_t MODEMBGXX::udp_has_data(uint8_t clientID)
+{
+	return tcp_has_data(clientID);
+}
+
+uint16_t MODEMBGXX::udp_recv(uint8_t clientID, char *data, uint16_t size)
+{
+	return tcp_recv(clientID, data, size);
+}
+
+// --- --- ---
+
 // --- TCP ---
 
 void MODEMBGXX::tcp_set_callback_on_close(void (*callback)(uint8_t clientID))
@@ -665,7 +789,7 @@ void MODEMBGXX::tcp_set_callback_on_close(void (*callback)(uint8_t clientID))
 /*
  * connect to a host:port
  *
- * @clientID - connection id 1-11, yet it is limited to MAX_TCP_CONNECTIONS
+ * @clientID - connection id 1-11, yet it is limited to MAX_SOCK_CONNECTIONS
  * @host - can be IP or DNS
  * @wait - maximum time to wait for at command response in ms
  *
@@ -678,7 +802,7 @@ bool MODEMBGXX::tcp_connect(uint8_t clientID, String host, uint16_t port, uint16
     if(apn_connected(contextID) != 1)
         return false;
 
-    if(clientID >= MAX_TCP_CONNECTIONS) return false;
+    if(clientID >= MAX_SOCK_CONNECTIONS) return false;
 
     memset(tcp[clientID].server, 0, sizeof(tcp[clientID].server));
     memcpy(tcp[clientID].server, host.c_str(), host.length());
@@ -703,7 +827,7 @@ bool MODEMBGXX::tcp_connect(uint8_t clientID, String host, uint16_t port, uint16
  * connect to a host:port
  *
  * @ccontextID - context id 1-16, yet it is limited to MAX_CONNECTIONS
- * @clientID - connection id 0-11, yet it is limited to MAX_TCP_CONNECTIONS
+ * @clientID - connection id 0-11, yet it is limited to MAX_SOCK_CONNECTIONS
  * @host - can be IP or DNS
  * @wait - maximum time to wait for at command response in ms
  *
@@ -716,7 +840,7 @@ bool MODEMBGXX::tcp_connect(uint8_t contextID, uint8_t clientID, String host, ui
 
     if(contextID == 0 || contextID > MAX_CONNECTIONS) return false;
 
-    if(clientID >= MAX_TCP_CONNECTIONS) return false;
+    if(clientID >= MAX_SOCK_CONNECTIONS) return false;
 
     memset(tcp[clientID].server, 0, sizeof(tcp[clientID].server));
     memcpy(tcp[clientID].server, host.c_str(), host.length());
@@ -742,7 +866,7 @@ bool MODEMBGXX::tcp_connect(uint8_t contextID, uint8_t clientID, String host, ui
  *
  * @contextID - context id 1-16, yet it is limited to MAX_CONNECTIONS
  * @sslClientID - id 0-5
- * @clientID - connection id 0-11, yet it is limited to MAX_TCP_CONNECTIONS
+ * @clientID - connection id 0-11, yet it is limited to MAX_SOCK_CONNECTIONS
  * @host - can be IP or DNS
  * @wait - maximum time to wait for at command response in ms
  *
@@ -755,7 +879,7 @@ bool MODEMBGXX::tcp_connect_ssl(uint8_t contextID, uint8_t sslClientID, uint8_t 
 
     if(contextID == 0 || contextID > MAX_CONNECTIONS) return false;
 
-    if(clientID >= MAX_TCP_CONNECTIONS) return false;
+    if(clientID >= MAX_SOCK_CONNECTIONS) return false;
 
     memset(tcp[clientID].server, 0, sizeof(tcp[clientID].server));
     memcpy(tcp[clientID].server, host.c_str(), host.length());
@@ -783,7 +907,7 @@ bool MODEMBGXX::tcp_connect_ssl(uint8_t contextID, uint8_t sslClientID, uint8_t 
 bool MODEMBGXX::tcp_connected(uint8_t clientID)
 {
 
-    if(clientID >= MAX_TCP_CONNECTIONS) return false;
+    if(clientID >= MAX_SOCK_CONNECTIONS) return false;
     return tcp[clientID].connected;
 }
 /*
@@ -794,13 +918,16 @@ bool MODEMBGXX::tcp_connected(uint8_t clientID)
 bool MODEMBGXX::tcp_close(uint8_t clientID)
 {
 
-    if(clientID >= MAX_TCP_CONNECTIONS)
+    if(clientID >= MAX_SOCK_CONNECTIONS)
         return false;
 
     tcp[clientID].active = false;
     connected_since[clientID] = 0;
     data_pending[clientID] = false;
 
+	if (!tcp[clientID].connected)
+		return false;
+	
     if(tcp[clientID].ssl)
     {
         if(check_command("AT+QSSLCLOSE=" + String(clientID), "OK", "ERROR", 10000))
@@ -854,7 +981,7 @@ bool MODEMBGXX::tcp_send(uint8_t clientID, const char *data, uint16_t size)
             return false;
     }
 
-    send_command(data, size);
+    send_command_raw((uint8_t*)data, size);
     delay(AT_WAIT_RESPONSE);
 
     uint32_t timeout = millis() + 10000;
@@ -894,7 +1021,7 @@ bool MODEMBGXX::tcp_send(uint8_t clientID, const char *data, uint16_t size)
 uint16_t MODEMBGXX::tcp_recv(uint8_t clientID, char *data, uint16_t size)
 {
 
-    if(clientID >= MAX_TCP_CONNECTIONS) return false;
+    if(clientID >= MAX_SOCK_CONNECTIONS) return false;
 
     if(buffer_len[clientID] == 0) return 0;
 
@@ -926,7 +1053,7 @@ uint16_t MODEMBGXX::tcp_recv(uint8_t clientID, char *data, uint16_t size)
 uint16_t MODEMBGXX::tcp_has_data(uint8_t clientID)
 {
 
-    if(clientID >= MAX_TCP_CONNECTIONS) return 0;
+    if(clientID >= MAX_SOCK_CONNECTIONS) return 0;
 
     return buffer_len[clientID];
 }
@@ -948,7 +1075,7 @@ bool MODEMBGXX::http_get(String host, String path, String token, uint8_t clientI
     if(contextID == 0 || contextID > MAX_CONNECTIONS)
         return false;
 
-    if(clientID >= MAX_TCP_CONNECTIONS)
+    if(clientID >= MAX_SOCK_CONNECTIONS)
         return false;
 
     if(token != "")
@@ -1002,7 +1129,7 @@ bool MODEMBGXX::https_get(String host, String path, String token, uint8_t client
     if(contextID == 0 || contextID > MAX_CONNECTIONS)
         return false;
 
-    if(clientID >= MAX_TCP_CONNECTIONS)
+    if(clientID >= MAX_SOCK_CONNECTIONS)
         return false;
 
     if(token != "")
@@ -1060,7 +1187,7 @@ bool MODEMBGXX::https_post(String host, String path, String body, String token, 
     if(contextID == 0 || contextID > MAX_CONNECTIONS)
         return false;
 
-    if(clientID >= MAX_TCP_CONNECTIONS)
+    if(clientID >= MAX_SOCK_CONNECTIONS)
         return false;
 
     if(token != "")
@@ -1124,7 +1251,7 @@ bool MODEMBGXX::https_post_json(String host, String path, String body, String to
     if(contextID == 0 || contextID > MAX_CONNECTIONS)
         return false;
 
-    if(clientID >= MAX_TCP_CONNECTIONS)
+    if(clientID >= MAX_SOCK_CONNECTIONS)
         return false;
 
     if(has_context(contextID))
@@ -1205,12 +1332,12 @@ bool MODEMBGXX::http_wait_response(uint8_t clientID)
 uint16_t MODEMBGXX::http_get_header_length(uint8_t clientID)
 {
 
-    if(clientID >= MAX_TCP_CONNECTIONS) return false;
+    if(clientID >= MAX_SOCK_CONNECTIONS) return false;
 
     if(buffer_len[clientID] == 0) return 0;
 
     uint16_t i;
-    uint8_t last_char = 0;
+    //uint8_t last_char = 0;
     for(i = 0; i < buffer_len[clientID]; i++)
     {
         char a = buffers[clientID][i - 3];
@@ -1458,7 +1585,7 @@ String MODEMBGXX::check_connection_state(uint8_t connectionID)
 
 /*
 void MODEMBGXX::check_modem_buffers() {
-    for (uint8_t cid = 0; cid < MAX_TCP_CONNECTIONS; cid++) {
+    for (uint8_t cid = 0; cid < MAX_SOCK_CONNECTIONS; cid++) {
         if(tcp[cid]) // 2 is reserverd for MQTT
             data_pending[cid] = true;
     }
@@ -1690,7 +1817,7 @@ String MODEMBGXX::parse_command_line(String line, bool set_data_pending)
             cid = line.substring(index - 1, index).toInt();
             state = line.substring(index + 1).toInt();
         }
-        if(cid >= MAX_TCP_CONNECTIONS)
+        if(cid >= MAX_SOCK_CONNECTIONS)
             return "";
 
         if(state == 0)
@@ -1723,14 +1850,14 @@ String MODEMBGXX::parse_command_line(String line, bool set_data_pending)
     {
         String cid_str = line.substring(15);
         uint8_t cid = cid_str.toInt();
-        if(cid >= MAX_TCP_CONNECTIONS)
+        if(cid >= MAX_SOCK_CONNECTIONS)
             return "";
         if(set_data_pending)
         {
             data_pending[cid] = true;
             return "";
         }
-        else
+        else /// DANGEROUS
         {
             tcp_read_buffer(cid);
             return "";
@@ -1747,20 +1874,20 @@ String MODEMBGXX::parse_command_line(String line, bool set_data_pending)
         {
             state = state.substring(index + 1, index + 1);
             cid = state.toInt();
-            if(cid >= MAX_TCP_CONNECTIONS)
+            if(cid >= MAX_SOCK_CONNECTIONS)
                 return "";
 #ifdef DEBUG_BG95_HIGH
             log("connection: " + String(cid) + " closed");
 #endif
             tcp[cid].connected = false;
-            tcp_close(cid);
+            tcp[cid].to_be_closed = true;
         }
     }
     else if(line.startsWith("+QSSLURC: \"recv\","))
     {
         String cid_str = line.substring(17);
         uint8_t cid = cid_str.toInt();
-        if(cid >= MAX_TCP_CONNECTIONS)
+        if(cid >= MAX_SOCK_CONNECTIONS)
             return "";
         if(set_data_pending)
         {
@@ -1784,16 +1911,16 @@ String MODEMBGXX::parse_command_line(String line, bool set_data_pending)
         {
             state = state.substring(index + 1, index + 1);
             cid = state.toInt();
-            if(cid >= MAX_TCP_CONNECTIONS)
+            if(cid >= MAX_SOCK_CONNECTIONS)
                 return "";
             log("connection: " + String(cid) + " closed");
             tcp[cid].connected = false;
-            tcp_close(cid);
+            tcp[cid].to_be_closed = true;
         }
     }
     else if(line.startsWith("+CMTI"))
     {
-        check_sms();
+        op.check_sms = true;
         return "";
     }
     else if(line.startsWith("+QIACT: "))
@@ -1852,7 +1979,7 @@ String MODEMBGXX::parse_command_line(String line, bool set_data_pending)
         uint8_t index = line.indexOf(filter);
         line = line.substring(index);
         index = line.indexOf(",");
-        if(index > -1)
+        //if(index > -1) // uint cannot be negative
         {
             String client = line.substring(filter.length(), index);
 #ifdef DEBUG_BG95_HIGH
@@ -2403,12 +2530,12 @@ bool MODEMBGXX::switch_radio_off()
 #endif
     if(check_command("AT+CFUN=0", "OK", "ERROR", 150000))
     {
-        for(uint8_t i = 0; i < MAX_TCP_CONNECTIONS; i++)
+        for(uint8_t i = 0; i < MAX_SOCK_CONNECTIONS; i++)
         {
             data_pending[i] = false;
             apn[i].connected = false;
         }
-        for(uint8_t i = 0; i < MAX_TCP_CONNECTIONS; i++)
+        for(uint8_t i = 0; i < MAX_SOCK_CONNECTIONS; i++)
         {
             tcp[i].connected = false;
         }
@@ -2434,42 +2561,32 @@ String MODEMBGXX::get_imei(uint32_t wait)
 
 String MODEMBGXX::get_ccid(uint32_t wait)
 {
-    uint32_t timeout = millis() + wait;
-
     String command = "AT+QCCID";
-    return get_command(command, "+QCCID: ", 1000);
+    return get_command(command, "+QCCID: ", wait);
 }
 
 String MODEMBGXX::get_imsi(uint32_t wait)
 {
-    uint32_t timeout = millis() + wait;
-
     String command = "AT+CIMI";
-    return get_command(command, 300);
+    return get_command(command, wait);
 }
 
 String MODEMBGXX::get_manufacturer_identification(uint32_t wait)
 {
-    uint32_t timeout = millis() + wait;
-
     String command = "AT+CGMI";
-    return get_command(command, 300);
+    return get_command(command, wait);
 }
 
 String MODEMBGXX::get_model_identification(uint32_t wait)
 {
-    uint32_t timeout = millis() + wait;
-
     String command = "AT+CGMM";
-    return get_command(command, 300);
+    return get_command(command, wait);
 }
 
 String MODEMBGXX::get_firmware_version(uint32_t wait)
 {
-    uint32_t timeout = millis() + wait;
-
     String command = "AT+CGMR";
-    return get_command(command, 300);
+    return get_command(command, wait);
 }
 
 String MODEMBGXX::get_ip(uint8_t cid, uint32_t wait)
@@ -2477,10 +2594,8 @@ String MODEMBGXX::get_ip(uint8_t cid, uint32_t wait)
     if(cid == 0 || cid > MAX_CONNECTIONS)
         return "";
 
-    uint32_t timeout = millis() + wait;
-
     String command = "AT+CGPADDR=" + String(cid);
-    return get_command(command, "+CGPADDR: " + String(cid) + ",", 300);
+    return get_command(command, "+CGPADDR: " + String(cid) + ",", wait);
 }
 
 // --- MQTT ---
@@ -2904,7 +3019,7 @@ void MODEMBGXX::MQTT_readMessages(uint8_t clientID)
 
     String s = "";
     int8_t i = 0;
-    bool read = false;
+    //bool read = false;
 
     /* check if a buffer has messages */
     do {
@@ -2926,11 +3041,12 @@ void MODEMBGXX::MQTT_readMessages(uint8_t clientID)
 /*
  * read tcp buffers from modem
  */
-void MODEMBGXX::tcp_check_data_pending()
+void MODEMBGXX::tcp_check_data_pending(bool force)
 {
-    for(uint8_t index = 0; index < MAX_TCP_CONNECTIONS; index++)
+    for(uint8_t index = 0; index < MAX_SOCK_CONNECTIONS; index++)
     {
-        if(!data_pending[index]) continue;
+        if (!force && !data_pending[index]) continue;
+        if (force && !tcp[index].connected) continue;
 
         tcp_read_buffer(index);
     }
@@ -2940,11 +3056,14 @@ void MODEMBGXX::tcp_read_buffer(uint8_t index, uint16_t wait)
 {
 
     while(modem->available())
-        modem->readStringUntil(AT_TERMINATOR);
+        log("Dropped: " + modem->readStringUntil(AT_TERMINATOR));
 
     int16_t left_space = CONNECTION_BUFFER - buffer_len[index];
-    if(left_space <= 10)
-        return;
+	if (left_space <= 10)
+		return;
+	
+	if (left_space > 1500)
+		left_space = 1500;
 
     if(tcp[index].ssl)
     {
@@ -2964,8 +3083,9 @@ void MODEMBGXX::tcp_read_buffer(uint8_t index, uint16_t wait)
     while(timeout >= millis() && !end)
     {
         while(modem->available())
-        {
+        {			
             info = modem->readStringUntil(AT_TERMINATOR);
+            log(">>> " + info);
 
             info.trim();
 
@@ -2979,8 +3099,7 @@ void MODEMBGXX::tcp_read_buffer(uint8_t index, uint16_t wait)
             */
             if(info.startsWith("+QIRD: "))
             {
-
-                log(info); // +QIRD
+                log("handling read"); // +QIRD
                 info = info.substring(7);
                 String size = info.substring(0, 1);
                 uint16_t len = info.toInt();
@@ -3006,7 +3125,7 @@ void MODEMBGXX::tcp_read_buffer(uint8_t index, uint16_t wait)
             else if(info.startsWith("+QSSLRECV: "))
             {
 #ifdef DEBUG_BG95_HIGH
-                log(info); // +QIRD
+                log("Handling SSL read"); // +QIRD
 #endif
                 info = info.substring(11);
                 String size = info.substring(0, 1);
@@ -3032,11 +3151,13 @@ void MODEMBGXX::tcp_read_buffer(uint8_t index, uint16_t wait)
             }
             else if(info == "OK")
             {
+				log("Cmd OK");
                 end = true;
                 return;
             }
             else if(info == "ERROR")
             {
+				log("Cmd ERR");
                 if(buffer_len[index] == 0)
                     data_pending[index] = false;
                 else
@@ -3045,6 +3166,7 @@ void MODEMBGXX::tcp_read_buffer(uint8_t index, uint16_t wait)
             }
             else
             {
+				log("Sending to parse");
                 parse_command_line(info);
             }
         }
@@ -3064,7 +3186,7 @@ void MODEMBGXX::send_command(String command, bool mute)
     modem->flush();
 }
 
-void MODEMBGXX::send_command(uint8_t *command, uint16_t size)
+void MODEMBGXX::send_command_raw(uint8_t *command, uint16_t size)
 {
 
     String data = "";
@@ -3566,15 +3688,15 @@ void MODEMBGXX::check_commands()
 
 void MODEMBGXX::log(String text)
 {
-
-    if(text.indexOf("ERROR") != -1)
+	log_output->println(text);
+    /*if(text.indexOf("ERROR") != -1)
         ESP_LOGE(TAG, "%s", text.c_str());
     else if(text.indexOf("disconnected") != -1)
         ESP_LOGE(TAG, "%s", text.c_str());
     else if(text.indexOf("connected") != -1)
         ESP_LOGI(TAG, "%s", text.c_str());
     else
-        ESP_LOGV(TAG, "%s", text.c_str());
+        ESP_LOGV(TAG, "%s", text.c_str());*/
 }
 
 String MODEMBGXX::date()

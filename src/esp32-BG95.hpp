@@ -76,12 +76,12 @@ class MODEMBGXX {
 		/*
 		* call it to initialize state machine
 		*/
-		bool init(uint8_t radio, uint16_t cops, uint8_t pwkey);
+		bool init(uint8_t radio, uint16_t cops, uint8_t pwkey, uint8_t pwled);
 		/*
 		* call it to initialize serial port
 		*/
 		void init_port(uint32_t baudrate, uint32_t config);
-		void init_port(uint32_t baudrate, uint32_t serial_config, uint8_t tx_pin, uint8_t rx_pin, int8_t ctsPin = -1, int8_t rtsPin = -1);
+		void init_port(uint32_t baudrate, uint32_t serial_config, uint8_t rx_pin, uint8_t tx_pin, int8_t ctsPin = -1, int8_t rtsPin = -1);
 		/*
 		* call it to disable serial port
 		*/
@@ -90,6 +90,8 @@ class MODEMBGXX {
 		* switch off and on
 		*/
 		bool powerCycle();
+		bool didReset();
+		
 		/*
 		* setup APN configuration
 		*
@@ -180,6 +182,14 @@ class MODEMBGXX {
 		*/
 		bool sms_remove(uint8_t index);
 
+		// --- UDP ---
+		bool udp_connect(uint8_t clientID, String host, uint16_t port, uint16_t wait = 10000);
+		bool udp_close(uint8_t clientID);
+		bool udp_connected(uint8_t clientID);
+		bool udp_send(uint8_t clientID, const char *data, uint16_t size, uint16_t wait = 10000);
+		uint16_t udp_has_data(uint8_t clientID);
+		uint16_t udp_recv(uint8_t clientID, char *data, uint16_t size);
+
 		// --- TCP ---
 		void tcp_set_callback_on_close(void(*callback)(uint8_t clientID));
 		bool tcp_connect(uint8_t clientID, String host, uint16_t port, uint16_t wait = 10000);
@@ -190,7 +200,7 @@ class MODEMBGXX {
 		bool tcp_send(uint8_t clientID, const char *data, uint16_t size);
 		uint16_t tcp_recv(uint8_t clientID, char *data, uint16_t size);
 		uint16_t tcp_has_data(uint8_t clientID);
-		void tcp_check_data_pending();
+		void tcp_check_data_pending(bool force = false);
 
 		// --- HTTP ---
 		bool http_get(String host, String path, String token, uint8_t clientID, uint8_t contextID);
@@ -268,7 +278,9 @@ class MODEMBGXX {
 		// configurations
 		struct Modem {
 			uint8_t pwkey;
+			uint8_t pwled;
 			bool ready;
+			bool did_reset;
 			bool did_config;
 			bool sim_ready;
 			uint8_t radio;
@@ -276,6 +288,7 @@ class MODEMBGXX {
 			bool force;
 			char tech_string[16];
 			uint8_t technology;
+			bool check_sms;
 		};
 
 		struct APN {
@@ -287,7 +300,7 @@ class MODEMBGXX {
 			char ip[15];
 		};
 
-		struct TCP {
+		struct Conn {
 			char server[64];
 			uint16_t port;
 			uint8_t contextID; // context id 1-16
@@ -297,6 +310,7 @@ class MODEMBGXX {
 			uint8_t socket_state;
 			bool active;
 			bool connected;
+			bool to_be_closed;
 		};
 
 		struct MQTT {
@@ -318,14 +332,17 @@ class MODEMBGXX {
 
 		Modem op = {
 			/* pwkey */ 			0,
+			/* pwled */				0,
 			/* ready */ 			false,
+					 false,
 			/* did_config */ 	false,
 			/* sim_ready */ 	false,
 			/* radio */			 	0,
 			/* cops */				0,
 			/* force */				false,
 			/* tech_string */	"",
-			/* technology */	0
+			/* technology */	0,
+			/* check_sms */     0,
 		};
 
 		// State
@@ -341,9 +358,9 @@ class MODEMBGXX {
 		// int8_t mqtt_tries[5] = {0,0,0,0,0}; // index of msg to read
 
 		APN apn[MAX_CONNECTIONS];
-		TCP tcp[MAX_TCP_CONNECTIONS];
+		Conn tcp[MAX_SOCK_CONNECTIONS];
 		MQTT mqtt[MAX_MQTT_CONNECTIONS];
-		HTTP http[MAX_TCP_CONNECTIONS];
+		HTTP http[MAX_SOCK_CONNECTIONS];
 
 		mbedtls_md_context_t ctx;
 
@@ -354,15 +371,15 @@ class MODEMBGXX {
 
 		// --- TCP ---
 		// size of each buffer
-		uint16_t buffer_len[MAX_TCP_CONNECTIONS];
+		uint16_t buffer_len[MAX_SOCK_CONNECTIONS];
 		// data pending of each connection
-		bool data_pending[MAX_TCP_CONNECTIONS];
+		bool data_pending[MAX_SOCK_CONNECTIONS];
 		// validity of each connection state
-		uint32_t connected_until[MAX_TCP_CONNECTIONS];
+		uint32_t connected_until[MAX_SOCK_CONNECTIONS];
 		// last connection start
-		uint32_t connected_since[MAX_TCP_CONNECTIONS];
+		uint32_t connected_since[MAX_SOCK_CONNECTIONS];
 		// data buffer for each connection
-		char buffers[MAX_TCP_CONNECTIONS][CONNECTION_BUFFER];
+		char buffers[MAX_SOCK_CONNECTIONS][CONNECTION_BUFFER];
 		// --- --- ---
 
 		uint32_t rssi_until = 20000;
@@ -466,7 +483,7 @@ class MODEMBGXX {
 		bool check_command_no_ok(String command, String ok_result, String error_result, uint32_t wait = 5000);
 
 		// send a command (or data for that matter)
-		void send_command(uint8_t *command, uint16_t size);
+		void send_command_raw(uint8_t *command, uint16_t size);
 		void send_command(String command, bool mute = false);
 
 		String get_command(String command, uint32_t timeout = 300);
