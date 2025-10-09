@@ -3209,7 +3209,7 @@ void MODEMBGXX::send_command_raw(uint8_t *command, uint16_t size)
     delay(AT_WAIT_RESPONSE);
 
 #ifdef DEBUG_BG95_HIGH
-    log("<< " + String((char *)command));
+    log("<< " + String((char *)command, size));
 #endif
 
     for(uint16_t i = 0; i < size; i++)
