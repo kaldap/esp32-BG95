@@ -197,6 +197,7 @@ bool MODEMBGXX::reset()
 {
 
     // APN reset
+	imei = "";
     op.ready = false;
     op.did_reset = true;
 
@@ -301,6 +302,26 @@ bool MODEMBGXX::loop(uint32_t wait)
     }
 
     return false;
+}
+
+bool MODEMBGXX::custom_loop()
+{
+	check_messages();
+
+	if (op.check_sms) {
+		op.check_sms = false;
+		check_sms();
+	}
+
+	for (uint8_t i = 0; i < MAX_SOCK_CONNECTIONS; i++)
+		if (tcp[i].to_be_closed)
+			tcp_close(i);   
+
+	tcp_check_data_pending();
+    get_state();
+	sync_clock_ntp();
+	
+	return true;
 }
 
 void MODEMBGXX::get_state()
@@ -2274,10 +2295,9 @@ int16_t MODEMBGXX::rssi()
     return rssi_last;
 }
 
-String MODEMBGXX::technology()
+const char * MODEMBGXX::technology()
 {
-
-    return String(op.tech_string);
+    return op.tech_string;
 }
 
 // use it to get network clock

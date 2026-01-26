@@ -108,6 +108,7 @@ class MODEMBGXX {
 		* check for pending commands and received data
 		*/
 		bool loop(uint32_t loop = 10);
+		bool custom_loop();
 
 		// --- MODEM static registered numbers ---
 		String get_imei(uint32_t wait = 5000);
@@ -127,7 +128,7 @@ class MODEMBGXX {
 		* freeRTOS - safe function
 		* return tech in use
 		*/
-		String technology(); // return tech in use
+		const char * technology(); // return tech in use
 		/*
 		* freeRTOS - safe function
 		* return tech in use - use it to check if modem is registered in a tower cell
