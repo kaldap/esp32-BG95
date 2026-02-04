@@ -26,27 +26,15 @@ void MODEMBGXX::init_port(uint32_t baudrate, uint32_t serial_config, uint8_t rx_
     modem->begin(baudrate, serial_config, rx_pin, tx_pin);
     if((ctsPin != -1) && (rtsPin != -1))
     {
-        log("||    Setting UART HW Control Flow    ||");
         modem->setPins(rx_pin, tx_pin, ctsPin, rtsPin);
         modem->setHwFlowCtrlMode();
     }
 
+	// Ignore all data before initialization
     modem->flush();
-#ifdef DEBUG_BG95
-    log("modem bus inited");
-#endif
     while(modem->available())
     {
-        String command = modem->readStringUntil(AT_TERMINATOR);
-
-        command.trim();
-
-        if(command.length() > 0)
-        {
-#ifdef DEBUG_BG95
-            log("[init port] ignoring '" + command + "'");
-#endif
-        }
+        modem->readStringUntil(AT_TERMINATOR);
     }
 }
 
@@ -343,51 +331,6 @@ int8_t MODEMBGXX::get_actual_mode()
     return op.technology;
 }
 
-void MODEMBGXX::log_status()
-{
-    get_state();
-    // log("imei: "+get_imei());
-    // log("ccid: "+get_ccid());
-    // log("has context: "+String(has_context()));
-    log_output->println();
-    log("--- MODEM STATE ---");
-    log("technology: " + String(op.tech_string));
-    log("rssi: " + String(rssi()));
-
-    for(uint8_t i = 0; i < MAX_CONNECTIONS; i++)
-    {
-        if(!apn[i].active)
-            continue;
-        if(apn[i].connected)
-            log("apn name: " + String(apn[i].name) + " connected with ip: " + String(apn[i].ip));
-        else
-            log("apn name: " + String(apn[i].name) + " disconnected");
-    }
-
-    for(uint8_t i = 0; i < MAX_SOCK_CONNECTIONS; i++)
-    {
-        if(!tcp[i].active)
-            continue;
-        if(tcp[i].connected)
-            log("tcp server: " + String(tcp[i].server) + ":" + String(tcp[i].port) + " connected");
-        else
-            log("tcp server: " + String(tcp[i].server) + ":" + String(tcp[i].port) + " disconnected");
-    }
-
-    for(uint8_t i = 0; i < MAX_MQTT_CONNECTIONS; i++)
-    {
-        if(!mqtt[i].active)
-            continue;
-        if(mqtt[i].connected)
-            log("mqtt host: " + String(mqtt[i].host) + " connected");
-        else
-            log("mqtt host: " + String(mqtt[i].host) + " disconnected");
-    }
-    log_output->println();
-
-    return;
-}
-
 bool MODEMBGXX::config()
 {
 
@@ -422,7 +365,7 @@ bool MODEMBGXX::config()
 
     if(get_ccid() == "")
     {
-        log("no sim card detected");
+        //log("no sim card detected");
         return false;
     }
 
@@ -542,7 +485,7 @@ void MODEMBGXX::check_sms()
             if(ret == "OK") break;
             if(ret == "ERROR") break;
 
-            log("[sms] '" + ret + "'");
+            //log("[sms] '" + ret + "'");
 
             String index = "", msg_state = "", origin = "", msg = "";
 
@@ -1116,16 +1059,16 @@ bool MODEMBGXX::http_get(String host, String path, String token, uint8_t clientI
 #endif
             if(!tcp_send(clientID, request.c_str(), request.length()))
             {
-                ESP_LOGD(TAG, "failure doing http request: %s \n", request.c_str());
+                //ESP_LOGD(TAG, "failure doing http request: %s \n", request.c_str());
                 tcp_close(clientID);
             }
         }
-        else
-            log_output->printf("Connection to %s has failed \n", host.c_str());
+        /*else
+            log_output->printf("Connection to %s has failed \n", host.c_str());*/
     }
     else
     {
-        log("no context");
+        //log("no context");
         return false;
     }
 
@@ -1172,17 +1115,17 @@ bool MODEMBGXX::https_get(String host, String path, String token, uint8_t client
 #endif
                 if(!tcp_send(clientID, request.c_str(), request.length()))
                 {
-                    ESP_LOGD(TAG, "failure doing http request: %s \n", request.c_str());
+                    //ESP_LOGD(TAG, "failure doing http request: %s \n", request.c_str());
                     tcp_close(clientID);
                 }
             }
-            else
-                log_output->printf("Connection to %s has failed \n", host.c_str());
+            /*else
+                log_output->printf("Connection to %s has failed \n", host.c_str());*/
         }
     }
     else
     {
-        log("no context");
+        //log("no context");
         return false;
     }
 
@@ -1236,17 +1179,17 @@ bool MODEMBGXX::https_post(String host, String path, String body, String token, 
 
                 if(!tcp_send(clientID, request.c_str(), request.length()))
                 {
-                    ESP_LOGD(TAG, "failure doing http request: %s \n", request.c_str());
+                    //ESP_LOGD(TAG, "failure doing http request: %s \n", request.c_str());
                     tcp_close(clientID);
                 }
             }
-            else
-                log_output->printf("Connection to %s has failed \n", host.c_str());
+           /* else
+                log_output->printf("Connection to %s has failed \n", host.c_str());*/
         }
     }
     else
     {
-        log("no context");
+        //log("no context");
         return false;
     }
 
@@ -1296,17 +1239,17 @@ bool MODEMBGXX::https_post_json(String host, String path, String body, String to
 
                 if(!tcp_send(clientID, request.c_str(), request.length()))
                 {
-                    ESP_LOGD(TAG, "failure doing http request: %s \n", request.c_str());
+                    //ESP_LOGD(TAG, "failure doing http request: %s \n", request.c_str());
                     tcp_close(clientID);
                 }
             }
-            else
-                log_output->printf("Connection to %s has failed \n", host.c_str());
+            /*else
+                log_output->printf("Connection to %s has failed \n", host.c_str());*/
         }
     }
     else
     {
-        log("no context");
+        //log("no context");
         return false;
     }
 
@@ -1332,7 +1275,7 @@ bool MODEMBGXX::http_wait_response(uint8_t clientID)
         return false;
 
     uint16_t header_len = http_get_header_length(clientID);
-    log_output->printf("header_length: %d \n", header_len);
+    //log_output->printf("header_length: %d \n", header_len);
 
     if(header_len == 0)
         return false;
@@ -1387,7 +1330,7 @@ void MODEMBGXX::http_parse_header(uint8_t clientID, char *data, uint16_t len)
     std::string header;
     header.assign(&data[0], &data[len - 1]);
 
-    uint16_t index = 0;
+    std::string::size_type index = 0;
     uint16_t i = 0;
     while(true)
     {
@@ -1648,7 +1591,7 @@ String MODEMBGXX::parse_command_line(String line, bool set_data_pending)
 
     if(line.startsWith("AT+"))
     {
-        log("echo is enabled, disable it");
+        //log("echo is enabled, disable it");
         send_command("ATE0");
     }
 
@@ -1660,9 +1603,9 @@ String MODEMBGXX::parse_command_line(String line, bool set_data_pending)
         else
             line = line.substring(_cgreg.length(), _cgreg.length() + 1);
         if(isNumeric(line))
-        {
-            int radio_state = line.toInt();
+        {            
 #ifdef DEBUG_BG95
+			int radio_state = line.toInt();
             switch(radio_state)
             {
                 case 0:
@@ -1701,22 +1644,22 @@ String MODEMBGXX::parse_command_line(String line, bool set_data_pending)
             switch(radio_state)
             {
                 case 0:
-                    log("LTE not registered");
+                    //log("LTE not registered");
                     break;
                 case 1:
-                    log("LTE registered");
+                    //log("LTE registered");
                     break;
                 case 2:
-                    log("LTE connecting");
+                    //log("LTE connecting");
                     break;
                 case 3:
-                    log("LTE registration denied");
+                   // log("LTE registration denied");
                     break;
                 case 4:
-                    log("LTE Unknow");
+                    //log("LTE Unknow");
                     break;
                 case 5:
-                    log("LTE registered, roaming");
+                    //log("LTE registered, roaming");
                     break;
             }
         }
@@ -1850,7 +1793,7 @@ String MODEMBGXX::parse_command_line(String line, bool set_data_pending)
         }
         else
         {
-            log("Error opening TCP");
+            //log("Error opening TCP");
             tcp[cid].connected = false;
         }
         /*
@@ -1934,7 +1877,7 @@ String MODEMBGXX::parse_command_line(String line, bool set_data_pending)
             cid = state.toInt();
             if(cid >= MAX_SOCK_CONNECTIONS)
                 return "";
-            log("connection: " + String(cid) + " closed");
+            //log("connection: " + String(cid) + " closed");
             tcp[cid].connected = false;
             tcp[cid].to_be_closed = true;
         }
@@ -2124,8 +2067,8 @@ void MODEMBGXX::read_data(uint8_t index, String command, uint16_t bytes)
         command.toCharArray(&buffers[index][buffer_len[index]], bytes);
         buffer_len[index] += bytes;
     }
-    else
-        log("buffer is full");
+    /*else
+        log("buffer is full");*/
 
     /**
      * This previous read can take "forever" and expire the connection state,
@@ -2438,7 +2381,7 @@ void MODEMBGXX::update_sys_clock()
 
         setTime(h, m, s, d, mo, y);
 
-        log_output->println(now());
+        //log_output->println(now());
     }
 }
 
@@ -2466,7 +2409,7 @@ String MODEMBGXX::scan_cells()
 
             if(response.length() == 0) continue;
 
-            log(response);
+            //log(response);
 
             if(response == "ERROR")
                 return "";
@@ -2482,7 +2425,7 @@ String MODEMBGXX::scan_cells()
 
             if(counter >= 255)
             {
-                log("!! overflow");
+                //log("!! overflow");
                 return cells;
             }
         }
@@ -2497,7 +2440,7 @@ String MODEMBGXX::get_position()
 #ifdef DEBUG_BG95
     log("getting cells information..");
 #endif
-    log(get_command("AT+QGPSCFG=\"gnssconfig\""));
+    //log(get_command("AT+QGPSCFG=\"gnssconfig\""));
 
     if(!check_command("AT+QGPS=1", "OK", "ERROR", 400)) return "";
 
@@ -3076,7 +3019,7 @@ void MODEMBGXX::tcp_read_buffer(uint8_t index, uint16_t wait)
 {
 
     while(modem->available())
-        log("Dropped: " + modem->readStringUntil(AT_TERMINATOR));
+        /*log("Dropped: " + */modem->readStringUntil(AT_TERMINATOR)/*)*/;
 
     int16_t left_space = CONNECTION_BUFFER - buffer_len[index];
 	if (left_space <= 10)
@@ -3105,7 +3048,7 @@ void MODEMBGXX::tcp_read_buffer(uint8_t index, uint16_t wait)
         while(modem->available())
         {			
             info = modem->readStringUntil(AT_TERMINATOR);
-            log(">>> " + info);
+            //log(">>> " + info);
 
             info.trim();
 
@@ -3119,7 +3062,7 @@ void MODEMBGXX::tcp_read_buffer(uint8_t index, uint16_t wait)
             */
             if(info.startsWith("+QIRD: "))
             {
-                log("handling read"); // +QIRD
+                //log("handling read"); // +QIRD
                 info = info.substring(7);
                 String size = info.substring(0, 1);
                 uint16_t len = info.toInt();
@@ -3132,7 +3075,7 @@ void MODEMBGXX::tcp_read_buffer(uint8_t index, uint16_t wait)
                     }
                     else
                     {
-                        log("buffer is full, data read after this will be discarded");
+                       //log("buffer is full, data read after this will be discarded");
                     }
                 }
                 if(buffer_len[index] == 0)
@@ -3159,7 +3102,7 @@ void MODEMBGXX::tcp_read_buffer(uint8_t index, uint16_t wait)
                     }
                     else
                     {
-                        log("buffer is full, data read after this will be discarded");
+                        //log("buffer is full, data read after this will be discarded");
                     }
                 }
                 if(buffer_len[index] == 0)
@@ -3171,13 +3114,13 @@ void MODEMBGXX::tcp_read_buffer(uint8_t index, uint16_t wait)
             }
             else if(info == "OK")
             {
-				log("Cmd OK");
+				//log("Cmd OK");
                 end = true;
                 return;
             }
             else if(info == "ERROR")
             {
-				log("Cmd ERR");
+				//log("Cmd ERR");
                 if(buffer_len[index] == 0)
                     data_pending[index] = false;
                 else
@@ -3186,7 +3129,7 @@ void MODEMBGXX::tcp_read_buffer(uint8_t index, uint16_t wait)
             }
             else
             {
-				log("Sending to parse");
+				//log("Sending to parse");
                 parse_command_line(info);
             }
         }
@@ -3706,18 +3649,20 @@ void MODEMBGXX::check_commands()
     }
 }
 
-void MODEMBGXX::log(String text)
+#ifndef NODEBUG_BG95
+/*void MODEMBGXX::log(const String& text)
 {
-	log_output->println(text);
-    /*if(text.indexOf("ERROR") != -1)
+	//log_output->println(text);
+    if(text.indexOf("ERROR") != -1)
         ESP_LOGE(TAG, "%s", text.c_str());
     else if(text.indexOf("disconnected") != -1)
         ESP_LOGE(TAG, "%s", text.c_str());
     else if(text.indexOf("connected") != -1)
         ESP_LOGI(TAG, "%s", text.c_str());
     else
-        ESP_LOGV(TAG, "%s", text.c_str());*/
-}
+        ESP_LOGV(TAG, "%s", text.c_str());
+}*/
+#endif
 
 String MODEMBGXX::date()
 {

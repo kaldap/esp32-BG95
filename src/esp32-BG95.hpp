@@ -7,9 +7,6 @@
 #include "mbedtls/md.h"
 
 #include "editable_macros.h"
-//BG95
-#define DEBUG_BG95 1
-#define DEBUG_BG95_HIGH 1
 
 #define GSM 	1
 #define GPRS 	2
@@ -54,7 +51,6 @@ struct SMS {
 class MODEMBGXX {
 	public:
 
-		HardwareSerial *log_output = &Serial0;
 		HardwareSerial *modem = &Serial2;
 
 		MODEMBGXX(){};
@@ -63,14 +59,6 @@ class MODEMBGXX {
 		*/
 		MODEMBGXX(HardwareSerial *serial_modem){
 			modem = serial_modem;
-		};
-		/*
-		* @serial_modem - Serial port for modem connection
-		* @serial_log - Serial port for logs
-		*/
-		MODEMBGXX(HardwareSerial *serial_modem, HardwareSerial *serial_log){
-			modem = serial_modem;
-			log_output = serial_log;
 		};
 
 		/*
@@ -253,7 +241,7 @@ class MODEMBGXX {
 		int8_t MQTT_publish(uint8_t clientID, uint16_t msg_id,uint8_t qos, uint8_t retain, String topic, String msg);
 		void MQTT_readAllBuffers(uint8_t clientID);
 
-		void log_status();
+		//void log_status();
 
 		String check_messages();
 
@@ -496,8 +484,6 @@ class MODEMBGXX {
 
 		bool wait_command(String command, uint32_t timeout = 300);
 
-		// debugging
-		void log(String text);
 		String date();
 		String pad2(int value);
 		boolean isNumeric(String str);
